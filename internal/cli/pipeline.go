@@ -63,6 +63,7 @@ func runPipeline(cmd *cobra.Command, envName string, op pipelineOp) error {
 		Type:        op.opType,
 		Environment: envName,
 		Class:       resolved.Class,
+		Satisfied:   collectSatisfiedRequirements(),
 	}
 
 	// Trusted policy. Missing default path is silent (empty policy = allow);
@@ -82,11 +83,14 @@ func runPipeline(cmd *cobra.Command, envName string, op pipelineOp) error {
 			Require: decision.Requirements,
 		})
 	}
-	if len(decision.Requirements) > 0 {
+	if len(decision.Unmet) > 0 {
+		if hint := suggestFlagsFor(decision.Unmet); hint != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+hint)
+		}
 		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
 			Source:  pol.Source,
-			Reason:  "unmet requirement(s) and no mechanism to satisfy them in this version",
-			Require: decision.Requirements,
+			Reason:  "unmet policy requirement(s)",
+			Require: decision.Unmet,
 		})
 	}
 

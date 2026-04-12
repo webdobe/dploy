@@ -91,6 +91,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		TargetEnv:   targetName,
 		TargetClass: target.Class,
 		Resources:   syncResources,
+		Satisfied:   collectSatisfiedRequirements(),
 	}
 
 	// 4. Trusted policy. Sync is especially sensitive — policy rules
@@ -110,11 +111,14 @@ func runSync(cmd *cobra.Command, args []string) error {
 			Require: decision.Requirements,
 		})
 	}
-	if len(decision.Requirements) > 0 {
+	if len(decision.Unmet) > 0 {
+		if hint := suggestFlagsFor(decision.Unmet); hint != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+hint)
+		}
 		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
 			Source:  pol.Source,
-			Reason:  "unmet requirement(s) and no mechanism to satisfy them in this version",
-			Require: decision.Requirements,
+			Reason:  "unmet policy requirement(s)",
+			Require: decision.Unmet,
 		})
 	}
 

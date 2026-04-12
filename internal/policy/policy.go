@@ -48,10 +48,17 @@ const (
 )
 
 // Decision is the outcome of evaluating a policy against a request.
+//
+// Requirements is every distinct require: item from matched rules.
+// Unmet is the subset of Requirements that the request did not list
+// under operation.Request.Satisfied — i.e. what the caller still has
+// to acknowledge (typically via a CLI flag like --confirm). Callers
+// should fail closed on Unmet, not on Requirements.
 type Decision struct {
 	Allowed      bool
 	MatchedRule  *Rule
 	Requirements []string
+	Unmet        []string
 	Reason       string
 }
 
@@ -82,9 +89,13 @@ func Load(path string) (*Policy, error) {
 // Evaluate returns a Decision for req against p. If no rule matches,
 // the default disposition is Allow (policy is additive by default).
 // Deny rules win over Allow rules when both match.
+//
+// Requirements is deduplicated and order-preserving across all matching
+// rules. Unmet is Requirements minus req.Satisfied.
 func (p *Policy) Evaluate(req operation.Request) Decision {
 	d := Decision{Allowed: true}
 
+	seenReq := map[string]bool{}
 	for i := range p.Rules {
 		r := &p.Rules[i]
 		if !r.matches(req) {
@@ -92,12 +103,31 @@ func (p *Policy) Evaluate(req operation.Request) Decision {
 		}
 		d.MatchedRule = r
 		d.Reason = r.Reason
-		d.Requirements = append(d.Requirements, r.Require...)
+		for _, item := range r.Require {
+			if !seenReq[item] {
+				seenReq[item] = true
+				d.Requirements = append(d.Requirements, item)
+			}
+		}
 		if r.Action == ActionDeny {
 			d.Allowed = false
 			return d
 		}
 	}
+
+	// Compute unmet requirements against what the caller has acknowledged.
+	if len(d.Requirements) > 0 {
+		satisfied := map[string]bool{}
+		for _, s := range req.Satisfied {
+			satisfied[s] = true
+		}
+		for _, item := range d.Requirements {
+			if !satisfied[item] {
+				d.Unmet = append(d.Unmet, item)
+			}
+		}
+	}
+
 	return d
 }
 

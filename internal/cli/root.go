@@ -11,11 +11,13 @@ import (
 
 // Global flags shared across commands.
 var (
-	configFile string
-	policyFile string
-	verbose    bool
-	quiet      bool
-	jsonOut    bool
+	configFile    string
+	policyFile    string
+	verbose       bool
+	quiet         bool
+	jsonOut       bool
+	confirmFlag   bool
+	sanitizedFlag bool
 )
 
 var rootCmd = &cobra.Command{
@@ -32,6 +34,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "print detailed output (commands, connection info, step-by-step execution)")
 	rootCmd.PersistentFlags().BoolVar(&quiet, "quiet", false, "reduce output to essentials")
 	rootCmd.PersistentFlags().BoolVar(&jsonOut, "json", false, "emit machine-readable JSON output where supported")
+	rootCmd.PersistentFlags().BoolVar(&confirmFlag, "confirm", false, "acknowledge policy 'confirm' requirements for this invocation")
+	rootCmd.PersistentFlags().BoolVar(&sanitizedFlag, "sanitized", false, "assert data has been sanitized (satisfies policy 'sanitization' requirements)")
 }
 
 // Execute runs the root command. Callers (cmd/dploy/main.go) should exit

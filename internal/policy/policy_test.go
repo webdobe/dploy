@@ -3,10 +3,21 @@ package policy
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/webdobe/dploy/internal/operation"
 )
+
+// sliceOrNil normalizes empty/nil slices so reflect.DeepEqual treats
+// them as equal. Requirements/Unmet accumulate via append and can be
+// nil when no rule matches; test cases use nil and []string{} interchangeably.
+func sliceOrNil(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
+}
 
 func TestEvaluate(t *testing.T) {
 	tests := []struct {
@@ -16,6 +27,7 @@ func TestEvaluate(t *testing.T) {
 		wantAllowed bool
 		wantMatched bool
 		wantReqs    []string
+		wantUnmet   []string
 		wantReason  string
 	}{
 		{
@@ -82,7 +94,7 @@ func TestEvaluate(t *testing.T) {
 			wantReason:  "frozen",
 		},
 		{
-			name: "allow with requirements surfaces the requirements",
+			name: "allow with requirements surfaces the requirements as unmet",
 			policy: Policy{Rules: []Rule{
 				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm"}},
 			}},
@@ -90,6 +102,61 @@ func TestEvaluate(t *testing.T) {
 			wantAllowed: true,
 			wantMatched: true,
 			wantReqs:    []string{"confirm"},
+			wantUnmet:   []string{"confirm"},
+		},
+		{
+			name: "requirements acknowledged by Satisfied are not unmet",
+			policy: Policy{Rules: []Rule{
+				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm"}},
+			}},
+			req: operation.Request{
+				Type: operation.TypeDeploy, Environment: "production",
+				Satisfied: []string{"confirm"},
+			},
+			wantAllowed: true,
+			wantMatched: true,
+			wantReqs:    []string{"confirm"},
+			wantUnmet:   nil,
+		},
+		{
+			name: "partial satisfaction leaves only the missing items unmet",
+			policy: Policy{Rules: []Rule{
+				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm", "sanitization"}},
+			}},
+			req: operation.Request{
+				Type: operation.TypeDeploy, Environment: "production",
+				Satisfied: []string{"confirm"},
+			},
+			wantAllowed: true,
+			wantMatched: true,
+			wantReqs:    []string{"confirm", "sanitization"},
+			wantUnmet:   []string{"sanitization"},
+		},
+		{
+			name: "requirements from multiple matching rules are deduplicated",
+			policy: Policy{Rules: []Rule{
+				{Operation: "deploy", Action: ActionAllow, Require: []string{"confirm"}},
+				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm", "sanitization"}},
+			}},
+			req:         operation.Request{Type: operation.TypeDeploy, Environment: "production"},
+			wantAllowed: true,
+			wantMatched: true,
+			wantReqs:    []string{"confirm", "sanitization"},
+			wantUnmet:   []string{"confirm", "sanitization"},
+		},
+		{
+			name: "extra Satisfied items that aren't required are benign",
+			policy: Policy{Rules: []Rule{
+				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm"}},
+			}},
+			req: operation.Request{
+				Type: operation.TypeDeploy, Environment: "production",
+				Satisfied: []string{"confirm", "sanitization", "some-future-requirement"},
+			},
+			wantAllowed: true,
+			wantMatched: true,
+			wantReqs:    []string{"confirm"},
+			wantUnmet:   nil,
 		},
 		{
 			name: "resource rule does not match when resources differ",
@@ -140,8 +207,11 @@ func TestEvaluate(t *testing.T) {
 			if tc.wantReason != "" && d.Reason != tc.wantReason {
 				t.Errorf("Reason = %q; want %q", d.Reason, tc.wantReason)
 			}
-			if len(tc.wantReqs) != len(d.Requirements) {
+			if !reflect.DeepEqual(sliceOrNil(tc.wantReqs), sliceOrNil(d.Requirements)) {
 				t.Errorf("Requirements = %v; want %v", d.Requirements, tc.wantReqs)
+			}
+			if !reflect.DeepEqual(sliceOrNil(tc.wantUnmet), sliceOrNil(d.Unmet)) {
+				t.Errorf("Unmet = %v; want %v", d.Unmet, tc.wantUnmet)
 			}
 		})
 	}

@@ -31,6 +31,10 @@ const (
 // environment from local context"). For deploy-style single-env ops, the
 // resolved env's class goes in Class. For sync operations it goes in
 // SourceClass / TargetClass.
+//
+// Satisfied lists policy requirements the caller has acknowledged via
+// CLI flags (e.g. "confirm" via --confirm, "sanitization" via
+// --sanitized). Policy evaluation treats required items present here as met.
 type Request struct {
 	Type        Type
 	Environment string
@@ -43,6 +47,7 @@ type Request struct {
 	Roles       []string // optional scope restriction
 	Resources   []string // sync: database, files, media, etc.
 	Artifact    string   // optional artifact reference
+	Satisfied   []string // acknowledged policy requirements
 }
 
 // ResultStatus is the final state of an operation run. See FAILURE_MODEL.md.
