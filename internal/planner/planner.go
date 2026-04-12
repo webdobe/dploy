@@ -39,12 +39,28 @@ type Step struct {
 }
 
 // BuildDeploy expands a deploy Request against resolved env/config into a Plan.
-// This is the primary entrypoint for deploy operations.
 func BuildDeploy(req operation.Request, cfg *config.Config, resolved *environment.Resolved) (*Plan, error) {
 	envCfg := cfg.Environments[resolved.Name]
+	return build(operation.TypeDeploy, envCfg.Deploy, req, resolved)
+}
 
+// BuildRollback expands a rollback Request against resolved env/config into a Plan.
+// Returns an error if the environment has no rollback block defined —
+// rollback is an explicit recovery operation, not an implicit inverse of deploy.
+func BuildRollback(req operation.Request, cfg *config.Config, resolved *environment.Resolved) (*Plan, error) {
+	envCfg := cfg.Environments[resolved.Name]
+	if len(envCfg.Rollback) == 0 {
+		return nil, fmt.Errorf("environment %q has no rollback steps defined", resolved.Name)
+	}
+	return build(operation.TypeRollback, envCfg.Rollback, req, resolved)
+}
+
+// build is the shared core of BuildDeploy / BuildRollback. opType labels
+// the plan for audit; steps is the ordered step list to expand against
+// each resolved target under on/on_role filters and --targets scoping.
+func build(opType operation.Type, steps []config.Step, req operation.Request, resolved *environment.Resolved) (*Plan, error) {
 	p := &Plan{
-		Operation:   operation.TypeDeploy,
+		Operation:   opType,
 		Environment: resolved.Name,
 		Class:       resolved.Class,
 		Strategy:    resolved.Strategy,
@@ -68,7 +84,7 @@ func BuildDeploy(req operation.Request, cfg *config.Config, resolved *environmen
 			Roles: append([]string(nil), t.Roles...),
 		}
 
-		for i, step := range envCfg.Deploy {
+		for i, step := range steps {
 			if !stepMatches(step, t) {
 				continue
 			}

@@ -2,6 +2,7 @@ package planner
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/webdobe/dploy/internal/config"
@@ -319,6 +320,90 @@ func TestBuildDeploy_ArtifactPassThrough(t *testing.T) {
 	}
 	if plan.Artifact != "v1.2.3" {
 		t.Errorf("Artifact = %q; want v1.2.3", plan.Artifact)
+	}
+}
+
+func TestBuildRollback_UsesRollbackStepsNotDeploy(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"s": {
+				Targets: map[string]config.Target{"a": {Type: "local", Path: "/p"}},
+				Deploy:  []config.Step{{Run: "deploy-step"}},
+				Rollback: []config.Step{
+					{Run: "restore-db"},
+					{Run: "restart"},
+				},
+			},
+		},
+	}
+	plan, err := BuildRollback(operation.Request{Type: operation.TypeRollback, Environment: "s"}, cfg, resolve(t, cfg, "s"))
+	if err != nil {
+		t.Fatalf("BuildRollback: %v", err)
+	}
+	if plan.Operation != operation.TypeRollback {
+		t.Errorf("Operation = %v; want rollback", plan.Operation)
+	}
+	got := commands(targetPlan(t, plan, "a").Steps)
+	want := []string{"restore-db", "restart"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commands = %v; want %v (must come from rollback block, not deploy)", got, want)
+	}
+}
+
+func TestBuildRollback_NoRollbackDefinedReturnsClearError(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"s": {
+				Targets: map[string]config.Target{"a": {Type: "local", Path: "/p"}},
+				Deploy:  []config.Step{{Run: "deploy-step"}},
+				// no Rollback block
+			},
+		},
+	}
+	_, err := BuildRollback(operation.Request{Type: operation.TypeRollback, Environment: "s"}, cfg, resolve(t, cfg, "s"))
+	if err == nil {
+		t.Fatal("expected error when environment has no rollback steps defined")
+	}
+	// CLI maps this error to ExitRollbackUnavail; the message is what
+	// users see, so lock in that it's specific rather than the generic
+	// "plan has no executable steps" message used elsewhere.
+	if !strings.Contains(err.Error(), "no rollback steps defined") {
+		t.Errorf("error = %q; want to contain 'no rollback steps defined'", err)
+	}
+}
+
+func TestBuildRollback_RespectsOnRoleFilter(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"s": {
+				Targets: map[string]config.Target{
+					"web":    {Type: "local", Path: "/p", Roles: []string{"web"}},
+					"worker": {Type: "local", Path: "/p", Roles: []string{"worker"}},
+				},
+				Rollback: []config.Step{
+					{Run: "web-restore", OnRole: "web"},
+					{Run: "worker-restore", OnRole: "worker"},
+				},
+			},
+		},
+	}
+	plan, err := BuildRollback(operation.Request{Type: operation.TypeRollback, Environment: "s"}, cfg, resolve(t, cfg, "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, tp := range plan.Targets {
+		got[tp.Name] = commands(tp.Steps)
+	}
+	want := map[string][]string{
+		"web":    {"web-restore"},
+		"worker": {"worker-restore"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("per-target commands = %v; want %v", got, want)
 	}
 }
 
