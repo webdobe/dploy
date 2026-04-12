@@ -219,6 +219,32 @@ func TestSequential_EmptyPlanIsFailedExecution(t *testing.T) {
 	}
 }
 
+func TestSequential_TargetEnvIsVisibleToSteps(t *testing.T) {
+	// Exercises the LocalRunner env-merge path used by sync workflows.
+	// When target.Env is set, those vars must reach the step's shell
+	// alongside the inherited os.Environ (scripts still need PATH etc.).
+	var buf bytes.Buffer
+	plan := newPlan(planner.TargetPlan{
+		Name: "local", Type: "local", Path: ".",
+		Env: map[string]string{
+			"DPLOY_SYNC_TEST_MARKER": "hello-from-env",
+		},
+		Steps: []planner.Step{
+			{Index: 0, Command: `echo "marker=$DPLOY_SYNC_TEST_MARKER"`},
+		},
+	})
+	result, err := NewSequential(&buf, nil).Execute(context.Background(), plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != operation.StatusSuccess {
+		t.Fatalf("Status = %v; want success", result.Status)
+	}
+	if !strings.Contains(result.Steps[0].Output, "marker=hello-from-env") {
+		t.Errorf("step output = %q; want to contain 'marker=hello-from-env'", result.Steps[0].Output)
+	}
+}
+
 func TestSequential_StepIndexPreservedFromPlan(t *testing.T) {
 	// The step's Index in the config may not be contiguous after
 	// filtering, but the executor must echo it back unchanged on the

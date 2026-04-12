@@ -6,6 +6,8 @@ package planner
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/webdobe/dploy/internal/config"
 	"github.com/webdobe/dploy/internal/environment"
@@ -23,12 +25,17 @@ type Plan struct {
 }
 
 // TargetPlan is the per-target slice of a Plan.
+//
+// Env, if non-empty, is merged onto os.Environ() by LocalRunner before
+// each step runs. Sync operations use this to expose DPLOY_SOURCE,
+// DPLOY_TARGET, etc. to script-first sync workflows.
 type TargetPlan struct {
 	Name  string
 	Type  string
 	Host  string
 	Path  string
 	Roles []string
+	Env   map[string]string
 	Steps []Step
 }
 
@@ -53,6 +60,82 @@ func BuildRollback(req operation.Request, cfg *config.Config, resolved *environm
 		return nil, fmt.Errorf("environment %q has no rollback steps defined", resolved.Name)
 	}
 	return build(operation.TypeRollback, envCfg.Rollback, req, resolved)
+}
+
+// BuildSync builds a sync Plan from source → target for the requested
+// resource(s). For v1, sync is script-first and runs locally: the plan
+// has a single "local" target that runs the concatenated workflow
+// commands from source.data.<resource> in order. Source/target env
+// names and classes are exposed to scripts via environment variables.
+//
+// The workflow name is the resource name (e.g. "database") looked up
+// in the source environment's data: block.
+func BuildSync(req operation.Request, cfg *config.Config, source, target *environment.Resolved) (*Plan, error) {
+	if req.SourceEnv == "" || req.TargetEnv == "" {
+		return nil, fmt.Errorf("sync requires both source and target environments")
+	}
+	if len(req.Resources) == 0 {
+		return nil, fmt.Errorf("sync requires at least one resource")
+	}
+
+	sourceEnv := cfg.Environments[source.Name]
+
+	// Concatenate workflow steps for each requested resource, preserving
+	// both order of resources and order within each workflow.
+	var plannedSteps []Step
+	idx := 0
+	for _, res := range req.Resources {
+		wf, ok := sourceEnv.Data[res]
+		if !ok {
+			available := sortedDataKeys(sourceEnv.Data)
+			if len(available) == 0 {
+				return nil, fmt.Errorf("source environment %q has no data: workflows defined", source.Name)
+			}
+			return nil, fmt.Errorf("source environment %q has no data.%s workflow (available: %s)", source.Name, res, strings.Join(available, ", "))
+		}
+		for _, cmd := range wf {
+			plannedSteps = append(plannedSteps, Step{Index: idx, Command: cmd})
+			idx++
+		}
+	}
+
+	env := map[string]string{
+		"DPLOY_SOURCE":       source.Name,
+		"DPLOY_TARGET":       target.Name,
+		"DPLOY_SOURCE_CLASS": source.Class,
+		"DPLOY_TARGET_CLASS": target.Class,
+		"DPLOY_RESOURCES":    strings.Join(req.Resources, ","),
+	}
+
+	return &Plan{
+		Operation: operation.TypeSync,
+		// State is keyed by Environment; for sync, that's the target
+		// (the env whose data changed). SourceEnv/TargetEnv on the
+		// Result carry the full picture for audit.
+		Environment: target.Name,
+		Class:       target.Class,
+		Artifact:    req.Artifact,
+		Targets: []TargetPlan{
+			{
+				Name:  "local",
+				Type:  "local",
+				Path:  ".",
+				Env:   env,
+				Steps: plannedSteps,
+			},
+		},
+	}, nil
+}
+
+// sortedDataKeys returns the keys of m in sorted order. Used only to
+// produce a deterministic "available workflows" list in error messages.
+func sortedDataKeys(m map[string][]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // build is the shared core of BuildDeploy / BuildRollback. opType labels

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
 	"time"
 
@@ -41,6 +42,15 @@ func (r *LocalRunner) Run(ctx context.Context, target planner.TargetPlan, step p
 	cmd.Dir = target.Path
 	cmd.Stdout = out
 	cmd.Stderr = out
+	if len(target.Env) > 0 {
+		// Merge target.Env onto the parent process environment rather
+		// than replacing it — scripts almost always need PATH, HOME,
+		// and similar to function.
+		cmd.Env = os.Environ()
+		for k, v := range target.Env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
 
 	err := cmd.Run()
 
