@@ -1,0 +1,22 @@
+# dploy local state and logs
+.dploy/
+
+# Build artifacts
+/dploy
+/bin/
+/dist/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/

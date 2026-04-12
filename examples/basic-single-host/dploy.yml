@@ -1,0 +1,15 @@
+app: example-app
+
+environments:
+  local:
+    class: development
+    strategy: sequential
+    targets:
+      dev:
+        type: local
+        path: .
+        roles: [web]
+    deploy:
+      - run: echo "pulling latest code"
+      - run: echo "installing deps"
+      - run: echo "restarting service"
