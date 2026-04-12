@@ -28,7 +28,8 @@ type Environment struct {
 	Deploy   []Step              `yaml:"deploy,omitempty"`
 	Rollback []Step              `yaml:"rollback,omitempty"`
 	Secrets  *SecretsRef         `yaml:"secrets,omitempty"`
-	Data     map[string][]string `yaml:"data,omitempty"`
+	Data     map[string][]string `yaml:"data,omitempty"`    // sync workflows, resource → commands
+	Capture  map[string][]string `yaml:"capture,omitempty"` // capture workflows, resource → commands
 }
 
 // Target is a single host or local path an environment runs against.

@@ -17,6 +17,8 @@ type Type string
 const (
 	TypeDeploy   Type = "deploy"
 	TypeSync     Type = "sync"
+	TypeCapture  Type = "capture"
+	TypeRestore  Type = "restore"
 	TypeRollback Type = "rollback"
 	TypeValidate Type = "validate"
 	TypeStatus   Type = "status"
@@ -79,6 +81,7 @@ type Result struct {
 	TargetEnv   string       `json:"target_env,omitempty"`
 	Resources   []string     `json:"resources,omitempty"`
 	Artifact    string       `json:"artifact,omitempty"`
+	SnapshotID  string       `json:"snapshot_id,omitempty"`
 	Status      ResultStatus `json:"status"`
 	Steps       []StepResult `json:"steps,omitempty"`
 	StartedAt   time.Time    `json:"started_at"`

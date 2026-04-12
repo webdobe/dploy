@@ -602,6 +602,173 @@ func TestBuildSync_RequiresResources(t *testing.T) {
 	}
 }
 
+// --- BuildCapture tests ---
+
+func TestBuildCapture_SingleResourceExpandsWorkflow(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"production": {
+				Class:   "production",
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Capture: map[string][]string{
+					"database": {"./dump.sh", "./upload.sh"},
+				},
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeCapture, Environment: "production",
+		Resources: []string{"database"},
+	}
+	plan, err := BuildCapture(req, cfg, resolve(t, cfg, "production"), "snap-test-id")
+	if err != nil {
+		t.Fatalf("BuildCapture: %v", err)
+	}
+
+	if plan.Operation != operation.TypeCapture {
+		t.Errorf("Operation = %v; want capture", plan.Operation)
+	}
+	if plan.Environment != "production" {
+		t.Errorf("Environment = %q; want production", plan.Environment)
+	}
+	if plan.Class != "production" {
+		t.Errorf("Class = %q; want production", plan.Class)
+	}
+	if len(plan.Targets) != 1 {
+		t.Fatalf("Targets = %d; want 1", len(plan.Targets))
+	}
+	tp := plan.Targets[0]
+	if tp.Name != "local" || tp.Type != "local" || tp.Path != "." {
+		t.Errorf("target = %+v; want {local, local, .}", tp)
+	}
+	if got := commands(tp.Steps); !reflect.DeepEqual(got, []string{"./dump.sh", "./upload.sh"}) {
+		t.Errorf("commands = %v; want [./dump.sh ./upload.sh]", got)
+	}
+	wantEnv := map[string]string{
+		"DPLOY_SOURCE":       "production",
+		"DPLOY_SOURCE_CLASS": "production",
+		"DPLOY_RESOURCES":    "database",
+		"DPLOY_SNAPSHOT_ID":  "snap-test-id",
+	}
+	if !reflect.DeepEqual(tp.Env, wantEnv) {
+		t.Errorf("env = %v; want %v", tp.Env, wantEnv)
+	}
+}
+
+func TestBuildCapture_MultipleResourcesConcatenateInOrder(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"production": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Capture: map[string][]string{
+					"database": {"db-1", "db-2"},
+					"files":    {"files-1"},
+				},
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeCapture, Environment: "production",
+		Resources: []string{"database", "files"},
+	}
+	plan, err := BuildCapture(req, cfg, resolve(t, cfg, "production"), "snap-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := commands(plan.Targets[0].Steps)
+	want := []string{"db-1", "db-2", "files-1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commands = %v; want %v", got, want)
+	}
+	if plan.Targets[0].Env["DPLOY_RESOURCES"] != "database,files" {
+		t.Errorf("DPLOY_RESOURCES = %q", plan.Targets[0].Env["DPLOY_RESOURCES"])
+	}
+}
+
+func TestBuildCapture_UnknownResourceListsAvailable(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"production": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Capture: map[string][]string{
+					"database": {"./dump.sh"},
+					"files":    {"./tar.sh"},
+				},
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeCapture, Environment: "production",
+		Resources: []string{"media"},
+	}
+	_, err := BuildCapture(req, cfg, resolve(t, cfg, "production"), "snap-id")
+	if err == nil {
+		t.Fatal("expected error for unknown capture resource")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "media") {
+		t.Errorf("error = %q; expected to mention 'media'", msg)
+	}
+	if !strings.Contains(msg, "database") || !strings.Contains(msg, "files") {
+		t.Errorf("error = %q; expected to list available workflows", msg)
+	}
+}
+
+func TestBuildCapture_NoCaptureBlockReturnsClearError(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"production": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				// no Capture block
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeCapture, Environment: "production",
+		Resources: []string{"database"},
+	}
+	_, err := BuildCapture(req, cfg, resolve(t, cfg, "production"), "snap-id")
+	if err == nil {
+		t.Fatal("expected error when env has no capture: block")
+	}
+	if !strings.Contains(err.Error(), "no capture: workflows defined") {
+		t.Errorf("error = %q; want to contain 'no capture: workflows defined'", err)
+	}
+}
+
+func TestBuildCapture_RequiresResourcesAndSnapshotID(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"production": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Capture: map[string][]string{"database": {"./dump.sh"}},
+			},
+		},
+	}
+	src := resolve(t, cfg, "production")
+
+	// Missing resources.
+	if _, err := BuildCapture(
+		operation.Request{Type: operation.TypeCapture, Environment: "production"},
+		cfg, src, "snap-id",
+	); err == nil {
+		t.Error("expected error when Resources is empty")
+	}
+
+	// Missing snapshot id.
+	if _, err := BuildCapture(
+		operation.Request{Type: operation.TypeCapture, Environment: "production", Resources: []string{"database"}},
+		cfg, src, "",
+	); err == nil {
+		t.Error("expected error when snapshotID is empty")
+	}
+}
+
 // sortedCopy returns a sorted copy of s without mutating the input.
 // Used to make order-independent target-name comparisons predictable.
 func sortedCopy(s []string) []string {
