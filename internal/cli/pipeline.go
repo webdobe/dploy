@@ -150,6 +150,9 @@ func runPipeline(cmd *cobra.Command, envName string, op pipelineOp) error {
 	switch result.Status {
 	case operation.StatusSuccess:
 		log.Info("%s succeeded", op.verb)
+		if op.opType == operation.TypeDeploy {
+			printNotes(cmd.OutOrStdout(), cfg.Environments[envName].Notes)
+		}
 		return nil
 	case operation.StatusPartialFailure:
 		return failure.WithExit(
@@ -168,6 +171,19 @@ func runPipeline(cmd *cobra.Command, envName string, op pipelineOp) error {
 		)
 	default:
 		return failure.WithExit(failure.ExitGeneralFailure, fmt.Errorf("%s finished with status %s", lowerVerb, result.Status))
+	}
+}
+
+// printNotes writes environment notes after a successful deploy. Notes are
+// guidance only — never executed — and are suppressed under --quiet.
+func printNotes(w io.Writer, notes []string) {
+	if quiet || len(notes) == 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Notes:")
+	for _, n := range notes {
+		fmt.Fprintf(w, "  - %s\n", n)
 	}
 }
 

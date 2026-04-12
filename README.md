@@ -134,11 +134,31 @@ Good glue, but still glue.
 
 ---
 
+## Install
+
+Requires Go 1.21 or newer.
+
+```bash
+go install github.com/webdobe/dploy/cmd/dploy@latest
+```
+
+The binary lands in `$(go env GOPATH)/bin`. If `dploy` isn't found after install, that directory isn't on your `PATH` — add it:
+
+```bash
+export PATH="$(go env GOPATH)/bin:$PATH"
+```
+
+(Add the same line to `~/.zshrc` or `~/.bashrc` to persist it.)
+
+Prebuilt binaries and a Homebrew tap are planned once the CLI stabilizes.
+
+---
+
 ## Example commands
 
 ```bash
-dploy deploy staging
-dploy deploy production
+dploy up staging
+dploy up production
 
 dploy env sync production local-jesse --resource database
 dploy env sync staging-main local-jesse --resource files
@@ -220,6 +240,9 @@ environments:
         on_role: web
       - run: php artisan queue:restart
         on_role: worker
+
+    notes:
+      - "tail logs: ssh web-1 'docker compose logs -f app'"
 
     data:
       sync_to_local:

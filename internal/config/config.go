@@ -26,6 +26,7 @@ type Environment struct {
 	Strategy Strategy            `yaml:"strategy,omitempty"`
 	Targets  map[string]Target   `yaml:"targets"`
 	Deploy   []Step              `yaml:"deploy,omitempty"`
+	Notes    []string            `yaml:"notes,omitempty"` // printed after a successful `up`, never executed
 	Rollback []Step              `yaml:"rollback,omitempty"`
 	Secrets  *SecretsRef         `yaml:"secrets,omitempty"`
 	Data     map[string][]string `yaml:"data,omitempty"`    // sync workflows, resource → commands

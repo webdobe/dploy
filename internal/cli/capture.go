@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -47,6 +49,40 @@ func init() {
 	rootCmd.AddCommand(captureCmd)
 	captureCmd.Flags().StringSliceVar(&captureResources, "resource", nil,
 		"resource(s) to capture (repeatable or comma-separated); required")
+}
+
+// printRestoreHint shows the exact command needed to restore this snapshot.
+// If exactly one other environment has a matching restore workflow for the
+// captured resources, suggest it by name; otherwise use a placeholder.
+func printRestoreHint(cmd *cobra.Command, cfg *config.Config, sourceEnv, snapshotID string, resources []string) {
+	if quiet {
+		return
+	}
+	var candidates []string
+	for name, env := range cfg.Environments {
+		if name == sourceEnv {
+			continue
+		}
+		for _, r := range resources {
+			if _, ok := env.Restore[r]; ok {
+				candidates = append(candidates, name)
+				break
+			}
+		}
+	}
+	sort.Strings(candidates)
+
+	target := "<target-env>"
+	if len(candidates) == 1 {
+		target = candidates[0]
+	}
+
+	fmt.Fprintln(cmd.OutOrStdout())
+	fmt.Fprintln(cmd.OutOrStdout(), "To restore:")
+	fmt.Fprintf(cmd.OutOrStdout(), "  dploy restore %s %s --resource %s\n", snapshotID, target, strings.Join(resources, ","))
+	if len(candidates) > 1 {
+		fmt.Fprintf(cmd.OutOrStdout(), "  (candidates: %s)\n", strings.Join(candidates, ", "))
+	}
 }
 
 func runCapture(cmd *cobra.Command, args []string) error {
@@ -146,6 +182,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	switch result.Status {
 	case operation.StatusSuccess:
 		log.Info("Capture succeeded (snapshot: %s)", snapshotID)
+		printRestoreHint(cmd, cfg, envName, snapshotID, captureResources)
 		return nil
 	case operation.StatusPartialFailure:
 		return failure.WithExit(

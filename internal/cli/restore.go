@@ -16,13 +16,10 @@ import (
 	"github.com/webdobe/dploy/internal/state"
 )
 
-var (
-	restoreResources []string
-	restoreSnapshot  string
-)
+var restoreResources []string
 
 var restoreCmd = &cobra.Command{
-	Use:   "restore <environment>",
+	Use:   "restore <snapshot-id> <environment>",
 	Short: "Restore a previously captured snapshot into an environment",
 	Long: `Apply a previously captured snapshot to the named environment by running
 that environment's restore workflow(s).
@@ -41,9 +38,9 @@ keyed by resource name. Scripts run locally, with these env vars set:
   DPLOY_SNAPSHOT_ENV   the environment the snapshot was captured from
 
 Examples:
-  dploy restore local --snapshot production-20260412-120000-abcdef --resource database
-  dploy restore staging --snapshot <id> --resource database,files`,
-	Args: cobra.ExactArgs(1),
+  dploy restore production-20260412-120000-abcdef local --resource database
+  dploy restore <snapshot-id> staging --resource database,files`,
+	Args: cobra.ExactArgs(2),
 	RunE: runRestore,
 }
 
@@ -51,21 +48,15 @@ func init() {
 	rootCmd.AddCommand(restoreCmd)
 	restoreCmd.Flags().StringSliceVar(&restoreResources, "resource", nil,
 		"resource(s) to restore (repeatable or comma-separated); required")
-	restoreCmd.Flags().StringVar(&restoreSnapshot, "snapshot", "",
-		"snapshot id to restore (as produced by 'dploy capture'); required")
 }
 
 func runRestore(cmd *cobra.Command, args []string) error {
-	envName := args[0]
+	snapshotID, envName := args[0], args[1]
 	log := logging.New(verbose, quiet)
 
 	if len(restoreResources) == 0 {
 		return failure.WithExit(failure.ExitGeneralFailure,
 			fmt.Errorf("restore requires --resource (e.g. --resource database)"))
-	}
-	if restoreSnapshot == "" {
-		return failure.WithExit(failure.ExitGeneralFailure,
-			fmt.Errorf("restore requires --snapshot <id>"))
 	}
 
 	// 1. Load + validate config.
@@ -89,7 +80,7 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	// 3. Locate the snapshot. We search across envs since the user may
 	//    be restoring a prod snapshot into a local env (the common case).
 	snapStore := state.NewFileSnapshotStore(filepath.Join(".dploy", "snapshots"))
-	snap, err := findSnapshot(snapStore, cfg, restoreSnapshot)
+	snap, err := findSnapshot(snapStore, cfg, snapshotID)
 	if err != nil {
 		return failure.WithExit(failure.ExitGeneralFailure, err)
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 var deployCmd = &cobra.Command{
-	Use:   "deploy <environment>",
+	Use:   "up <environment>",
 	Short: "Run deploy steps for an environment",
 	Long: `Run the configured deploy steps against the named environment.
 
