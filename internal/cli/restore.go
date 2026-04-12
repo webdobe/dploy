@@ -1,22 +1,18 @@
 package cli
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/webdobe/dploy/internal/config"
 	"github.com/webdobe/dploy/internal/environment"
-	"github.com/webdobe/dploy/internal/executor"
 	"github.com/webdobe/dploy/internal/failure"
 	"github.com/webdobe/dploy/internal/logging"
 	"github.com/webdobe/dploy/internal/operation"
 	"github.com/webdobe/dploy/internal/planner"
-	"github.com/webdobe/dploy/internal/policy"
 	"github.com/webdobe/dploy/internal/state"
 )
 
@@ -108,30 +104,9 @@ func runRestore(cmd *cobra.Command, args []string) error {
 	}
 
 	// 5. Trusted policy.
-	pol, err := policy.Load(policyFile)
+	pol, err := evaluatePolicy(cmd, log, req)
 	if err != nil {
-		return failure.WithExit(failure.ExitGeneralFailure, err)
-	}
-	if pol.Source != "" {
-		log.Debug("loaded policy from %s (%d rules)", pol.Source, len(pol.Rules))
-	}
-	decision := pol.Evaluate(req)
-	if !decision.Allowed {
-		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
-			Source:  pol.Source,
-			Reason:  decision.Reason,
-			Require: decision.Requirements,
-		})
-	}
-	if len(decision.Unmet) > 0 {
-		if hint := suggestFlagsFor(decision.Unmet); hint != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+hint)
-		}
-		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
-			Source:  pol.Source,
-			Reason:  "unmet policy requirement(s)",
-			Require: decision.Unmet,
-		})
+		return err
 	}
 
 	// 6. Plan.
@@ -146,31 +121,16 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout())
 	}
 
-	// 8. Execute.
-	var stream io.Writer
-	if !quiet {
-		stream = cmd.OutOrStdout()
-	}
-	seq := executor.NewSequential(stream, func(_ string, index, total int, command string) {
-		log.Step(index, total, command)
+	// 8. Execute + record.
+	result, err := executeAndRecord(cmd, log, plan, pol.Source, func(r *operation.Result) {
+		r.Resources = restoreResources
+		r.SnapshotID = snap.ID
 	})
-
-	ctx := context.Background()
-	result, err := seq.Execute(ctx, plan)
 	if err != nil {
-		return failure.WithExit(failure.ExitGeneralFailure, err)
-	}
-	result.PolicySrc = pol.Source
-	result.Resources = restoreResources
-	result.SnapshotID = snap.ID
-
-	// 9. Record state.
-	store := state.NewFileStore(filepath.Join(".dploy", "state"))
-	if recErr := store.Record(result); recErr != nil {
-		log.Error("warning: failed to record state: %v", recErr)
+		return err
 	}
 
-	// 10. Summarize.
+	// 9. Summarize.
 	if !quiet {
 		fmt.Fprintln(cmd.OutOrStdout())
 	}

@@ -1,22 +1,16 @@
 package cli
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/webdobe/dploy/internal/config"
 	"github.com/webdobe/dploy/internal/environment"
-	"github.com/webdobe/dploy/internal/executor"
 	"github.com/webdobe/dploy/internal/failure"
 	"github.com/webdobe/dploy/internal/logging"
 	"github.com/webdobe/dploy/internal/operation"
 	"github.com/webdobe/dploy/internal/planner"
-	"github.com/webdobe/dploy/internal/policy"
-	"github.com/webdobe/dploy/internal/state"
 )
 
 var syncResources []string
@@ -96,30 +90,9 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	// 4. Trusted policy. Sync is especially sensitive — policy rules
 	//    typically gate source→target direction, sanitization, etc.
-	pol, err := policy.Load(policyFile)
+	pol, err := evaluatePolicy(cmd, log, req)
 	if err != nil {
-		return failure.WithExit(failure.ExitGeneralFailure, err)
-	}
-	if pol.Source != "" {
-		log.Debug("loaded policy from %s (%d rules)", pol.Source, len(pol.Rules))
-	}
-	decision := pol.Evaluate(req)
-	if !decision.Allowed {
-		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
-			Source:  pol.Source,
-			Reason:  decision.Reason,
-			Require: decision.Requirements,
-		})
-	}
-	if len(decision.Unmet) > 0 {
-		if hint := suggestFlagsFor(decision.Unmet); hint != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+hint)
-		}
-		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
-			Source:  pol.Source,
-			Reason:  "unmet policy requirement(s)",
-			Require: decision.Unmet,
-		})
+		return err
 	}
 
 	// 5. Build the plan.
@@ -135,36 +108,19 @@ func runSync(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout())
 	}
 
-	// 7. Execute. Sync has a single local "target" so we don't prefix
-	//    step announcements with a target name.
-	var stream io.Writer
-	if !quiet {
-		stream = cmd.OutOrStdout()
-	}
-	seq := executor.NewSequential(stream, func(_ string, index, total int, command string) {
-		log.Step(index, total, command)
+	// 7. Execute + record. The plan already set Environment = target.Name
+	//    so status/logs lookups work. Attach source/target/resources to
+	//    the record for audit visibility.
+	result, err := executeAndRecord(cmd, log, plan, pol.Source, func(r *operation.Result) {
+		r.SourceEnv = sourceName
+		r.TargetEnv = targetName
+		r.Resources = syncResources
 	})
-
-	ctx := context.Background()
-	result, err := seq.Execute(ctx, plan)
 	if err != nil {
-		return failure.WithExit(failure.ExitGeneralFailure, err)
-	}
-	result.PolicySrc = pol.Source
-	// The plan already set Environment = target.Name so status/logs
-	// lookups work. Attach source/target/resources to the record for
-	// audit visibility.
-	result.SourceEnv = sourceName
-	result.TargetEnv = targetName
-	result.Resources = syncResources
-
-	// 8. Record.
-	store := state.NewFileStore(filepath.Join(".dploy", "state"))
-	if recErr := store.Record(result); recErr != nil {
-		log.Error("warning: failed to record state: %v", recErr)
+		return err
 	}
 
-	// 9. Summarize and map status to exit code.
+	// 8. Summarize and map status to exit code.
 	if !quiet {
 		fmt.Fprintln(cmd.OutOrStdout())
 	}

@@ -1,9 +1,7 @@
 package cli
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"path/filepath"
 	"time"
 
@@ -11,12 +9,10 @@ import (
 
 	"github.com/webdobe/dploy/internal/config"
 	"github.com/webdobe/dploy/internal/environment"
-	"github.com/webdobe/dploy/internal/executor"
 	"github.com/webdobe/dploy/internal/failure"
 	"github.com/webdobe/dploy/internal/logging"
 	"github.com/webdobe/dploy/internal/operation"
 	"github.com/webdobe/dploy/internal/planner"
-	"github.com/webdobe/dploy/internal/policy"
 	"github.com/webdobe/dploy/internal/state"
 )
 
@@ -95,30 +91,9 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	// 4. Trusted policy.
-	pol, err := policy.Load(policyFile)
+	pol, err := evaluatePolicy(cmd, log, req)
 	if err != nil {
-		return failure.WithExit(failure.ExitGeneralFailure, err)
-	}
-	if pol.Source != "" {
-		log.Debug("loaded policy from %s (%d rules)", pol.Source, len(pol.Rules))
-	}
-	decision := pol.Evaluate(req)
-	if !decision.Allowed {
-		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
-			Source:  pol.Source,
-			Reason:  decision.Reason,
-			Require: decision.Requirements,
-		})
-	}
-	if len(decision.Unmet) > 0 {
-		if hint := suggestFlagsFor(decision.Unmet); hint != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+hint)
-		}
-		return failure.WithExit(failure.ExitPolicyDenied, &failure.PolicyError{
-			Source:  pol.Source,
-			Reason:  "unmet policy requirement(s)",
-			Require: decision.Unmet,
-		})
+		return err
 	}
 
 	// 5. Plan.
@@ -133,34 +108,19 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout())
 	}
 
-	// 7. Execute.
-	var stream io.Writer
-	if !quiet {
-		stream = cmd.OutOrStdout()
-	}
-	seq := executor.NewSequential(stream, func(_ string, index, total int, command string) {
-		log.Step(index, total, command)
+	// 7. Execute + record. StartedAt already set by Execute; overwrite
+	//    with our pre-exec time so the snapshot id and the record
+	//    timestamps line up.
+	result, err := executeAndRecord(cmd, log, plan, pol.Source, func(r *operation.Result) {
+		r.Resources = captureResources
+		r.SnapshotID = snapshotID
+		r.StartedAt = startedAt
 	})
-
-	ctx := context.Background()
-	result, err := seq.Execute(ctx, plan)
 	if err != nil {
-		return failure.WithExit(failure.ExitGeneralFailure, err)
-	}
-	result.PolicySrc = pol.Source
-	result.Resources = captureResources
-	result.SnapshotID = snapshotID
-	// StartedAt already set by Execute; overwrite with our pre-exec time
-	// so the snapshot id and the record timestamps line up.
-	result.StartedAt = startedAt
-
-	// 8. Record state (per-env latest-op).
-	store := state.NewFileStore(filepath.Join(".dploy", "state"))
-	if recErr := store.Record(result); recErr != nil {
-		log.Error("warning: failed to record state: %v", recErr)
+		return err
 	}
 
-	// 9. Record snapshot metadata for any operation that actually ran.
+	// 8. Record snapshot metadata for any operation that actually ran.
 	//    Pre-execution failures (validate/policy) return earlier, so if
 	//    we got here we at least attempted work — users deserve a record.
 	snapStore := state.NewFileSnapshotStore(filepath.Join(".dploy", "snapshots"))
@@ -179,7 +139,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		log.Error("warning: failed to record snapshot metadata: %v", recErr)
 	}
 
-	// 10. Summarize.
+	// 9. Summarize.
 	if !quiet {
 		fmt.Fprintln(cmd.OutOrStdout())
 	}
