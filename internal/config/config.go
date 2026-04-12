@@ -30,6 +30,7 @@ type Environment struct {
 	Secrets  *SecretsRef         `yaml:"secrets,omitempty"`
 	Data     map[string][]string `yaml:"data,omitempty"`    // sync workflows, resource → commands
 	Capture  map[string][]string `yaml:"capture,omitempty"` // capture workflows, resource → commands
+	Restore  map[string][]string `yaml:"restore,omitempty"` // restore workflows, resource → commands
 }
 
 // Target is a single host or local path an environment runs against.

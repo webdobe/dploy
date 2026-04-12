@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -98,6 +99,46 @@ func TestFileSnapshotStore_ListReturnsNilForUnknownEnv(t *testing.T) {
 	}
 	if list != nil {
 		t.Errorf("List = %v; want nil for env with no snapshots", list)
+	}
+}
+
+func TestFileSnapshotStore_GetReturnsRecordedSnapshot(t *testing.T) {
+	s := NewFileSnapshotStore(t.TempDir())
+
+	snap := &Snapshot{
+		ID:        "production-20260412-120000-abcdef",
+		Env:       "production",
+		Class:     "production",
+		Resources: []string{"database"},
+		Status:    operation.StatusSuccess,
+		Sanitized: true,
+		CreatedAt: time.Date(2026, 4, 12, 12, 0, 0, 0, time.UTC),
+	}
+	if err := s.Record(snap); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	got, err := s.Get("production", snap.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.ID != snap.ID || got.Env != "production" || !got.Sanitized {
+		t.Errorf("round-trip: %+v", got)
+	}
+	if len(got.Resources) != 1 || got.Resources[0] != "database" {
+		t.Errorf("Resources = %v; want [database]", got.Resources)
+	}
+}
+
+func TestFileSnapshotStore_GetReturnsNotFoundForUnknownID(t *testing.T) {
+	s := NewFileSnapshotStore(t.TempDir())
+
+	_, err := s.Get("production", "does-not-exist")
+	if err == nil {
+		t.Fatal("expected error for missing snapshot")
+	}
+	if !errors.Is(err, ErrSnapshotNotFound) {
+		t.Errorf("err = %v; want ErrSnapshotNotFound", err)
 	}
 }
 

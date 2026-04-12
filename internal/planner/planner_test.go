@@ -769,6 +769,170 @@ func TestBuildCapture_RequiresResourcesAndSnapshotID(t *testing.T) {
 	}
 }
 
+// --- BuildRestore tests ---
+
+func TestBuildRestore_SingleResourceExpandsWorkflow(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"local": {
+				Class:   "local",
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Restore: map[string][]string{
+					"database": {"./download.sh", "./restore.sh"},
+				},
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeRestore, Environment: "local",
+		Resources: []string{"database"},
+	}
+	plan, err := BuildRestore(req, cfg, resolve(t, cfg, "local"), "snap-test-id", "production")
+	if err != nil {
+		t.Fatalf("BuildRestore: %v", err)
+	}
+
+	if plan.Operation != operation.TypeRestore {
+		t.Errorf("Operation = %v; want restore", plan.Operation)
+	}
+	if plan.Environment != "local" {
+		t.Errorf("Environment = %q; want local", plan.Environment)
+	}
+	if len(plan.Targets) != 1 {
+		t.Fatalf("Targets = %d; want 1", len(plan.Targets))
+	}
+	tp := plan.Targets[0]
+	if tp.Name != "local" || tp.Type != "local" || tp.Path != "." {
+		t.Errorf("target = %+v; want {local, local, .}", tp)
+	}
+	if got := commands(tp.Steps); !reflect.DeepEqual(got, []string{"./download.sh", "./restore.sh"}) {
+		t.Errorf("commands = %v; want [./download.sh ./restore.sh]", got)
+	}
+	wantEnv := map[string]string{
+		"DPLOY_TARGET":       "local",
+		"DPLOY_TARGET_CLASS": "local",
+		"DPLOY_RESOURCES":    "database",
+		"DPLOY_SNAPSHOT_ID":  "snap-test-id",
+		"DPLOY_SNAPSHOT_ENV": "production",
+	}
+	if !reflect.DeepEqual(tp.Env, wantEnv) {
+		t.Errorf("env = %v; want %v", tp.Env, wantEnv)
+	}
+}
+
+func TestBuildRestore_MultipleResourcesConcatenateInOrder(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"local": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Restore: map[string][]string{
+					"database": {"db-1", "db-2"},
+					"files":    {"files-1"},
+				},
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeRestore, Environment: "local",
+		Resources: []string{"database", "files"},
+	}
+	plan, err := BuildRestore(req, cfg, resolve(t, cfg, "local"), "snap-id", "production")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := commands(plan.Targets[0].Steps)
+	want := []string{"db-1", "db-2", "files-1"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("commands = %v; want %v", got, want)
+	}
+	if plan.Targets[0].Env["DPLOY_RESOURCES"] != "database,files" {
+		t.Errorf("DPLOY_RESOURCES = %q", plan.Targets[0].Env["DPLOY_RESOURCES"])
+	}
+}
+
+func TestBuildRestore_UnknownResourceListsAvailable(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"local": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Restore: map[string][]string{
+					"database": {"./restore.sh"},
+					"files":    {"./untar.sh"},
+				},
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeRestore, Environment: "local",
+		Resources: []string{"media"},
+	}
+	_, err := BuildRestore(req, cfg, resolve(t, cfg, "local"), "snap-id", "production")
+	if err == nil {
+		t.Fatal("expected error for unknown restore resource")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "media") {
+		t.Errorf("error = %q; expected to mention 'media'", msg)
+	}
+	if !strings.Contains(msg, "database") || !strings.Contains(msg, "files") {
+		t.Errorf("error = %q; expected to list available workflows", msg)
+	}
+}
+
+func TestBuildRestore_NoRestoreBlockReturnsClearError(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"local": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+			},
+		},
+	}
+	req := operation.Request{
+		Type: operation.TypeRestore, Environment: "local",
+		Resources: []string{"database"},
+	}
+	_, err := BuildRestore(req, cfg, resolve(t, cfg, "local"), "snap-id", "production")
+	if err == nil {
+		t.Fatal("expected error when env has no restore: block")
+	}
+	if !strings.Contains(err.Error(), "no restore: workflows defined") {
+		t.Errorf("error = %q; want to contain 'no restore: workflows defined'", err)
+	}
+}
+
+func TestBuildRestore_RequiresResourcesAndSnapshotID(t *testing.T) {
+	cfg := &config.Config{
+		App: "x",
+		Environments: map[string]config.Environment{
+			"local": {
+				Targets: map[string]config.Target{"web": {Type: "local", Path: "/p"}},
+				Restore: map[string][]string{"database": {"./restore.sh"}},
+			},
+		},
+	}
+	tgt := resolve(t, cfg, "local")
+
+	// Missing resources.
+	if _, err := BuildRestore(
+		operation.Request{Type: operation.TypeRestore, Environment: "local"},
+		cfg, tgt, "snap-id", "production",
+	); err == nil {
+		t.Error("expected error when Resources is empty")
+	}
+
+	// Missing snapshot id.
+	if _, err := BuildRestore(
+		operation.Request{Type: operation.TypeRestore, Environment: "local", Resources: []string{"database"}},
+		cfg, tgt, "", "production",
+	); err == nil {
+		t.Error("expected error when snapshotID is empty")
+	}
+}
+
 // sortedCopy returns a sorted copy of s without mutating the input.
 // Used to make order-independent target-name comparisons predictable.
 func sortedCopy(s []string) []string {

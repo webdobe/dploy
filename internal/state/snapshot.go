@@ -37,7 +37,12 @@ type Snapshot struct {
 type SnapshotStore interface {
 	Record(snap *Snapshot) error
 	List(env string) ([]*Snapshot, error)
+	Get(env, id string) (*Snapshot, error)
 }
+
+// ErrSnapshotNotFound is returned by Get when no snapshot with the
+// requested (env, id) pair exists.
+var ErrSnapshotNotFound = errors.New("snapshot: not found")
 
 // FileSnapshotStore keeps one JSON file per snapshot under
 // <dir>/<env>/<id>.json. Snapshots are append-only; unlike state
@@ -110,6 +115,25 @@ func (s *FileSnapshotStore) List(env string) ([]*Snapshot, error) {
 		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
 	return out, nil
+}
+
+// Get reads the snapshot metadata for the given (env, id). Returns
+// ErrSnapshotNotFound if no such record exists — callers typically
+// surface this as a user-facing "snapshot X not found in env Y" error.
+func (s *FileSnapshotStore) Get(env, id string) (*Snapshot, error) {
+	path := filepath.Join(s.dir, env, id+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, ErrSnapshotNotFound
+		}
+		return nil, fmt.Errorf("snapshot: read %s: %w", path, err)
+	}
+	var snap Snapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return nil, fmt.Errorf("snapshot: parse %s: %w", path, err)
+	}
+	return &snap, nil
 }
 
 // NewSnapshotID builds a snapshot identifier from the environment name,

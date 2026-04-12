@@ -190,6 +190,68 @@ func BuildCapture(req operation.Request, cfg *config.Config, source *environment
 	}, nil
 }
 
+// BuildRestore builds a restore Plan for the named target environment
+// using an existing snapshot. Like capture, restore runs locally — the
+// configured scripts are responsible for fetching the snapshot's data
+// and applying it to the target (e.g. download + mysql < dump.sql).
+//
+// The snapshot has already been located by the caller (so we can read
+// its origin env for DPLOY_SNAPSHOT_ENV); the workflow itself is pulled
+// from the *target* environment's restore: block, keyed by resource.
+func BuildRestore(req operation.Request, cfg *config.Config, target *environment.Resolved, snapshotID, snapshotEnv string) (*Plan, error) {
+	if target == nil {
+		return nil, fmt.Errorf("restore requires a resolved environment")
+	}
+	if len(req.Resources) == 0 {
+		return nil, fmt.Errorf("restore requires at least one resource")
+	}
+	if snapshotID == "" {
+		return nil, fmt.Errorf("restore requires a snapshot id")
+	}
+
+	targetEnv := cfg.Environments[target.Name]
+
+	var plannedSteps []Step
+	idx := 0
+	for _, res := range req.Resources {
+		wf, ok := targetEnv.Restore[res]
+		if !ok {
+			available := sortedDataKeys(targetEnv.Restore)
+			if len(available) == 0 {
+				return nil, fmt.Errorf("environment %q has no restore: workflows defined", target.Name)
+			}
+			return nil, fmt.Errorf("environment %q has no restore.%s workflow (available: %s)", target.Name, res, strings.Join(available, ", "))
+		}
+		for _, cmd := range wf {
+			plannedSteps = append(plannedSteps, Step{Index: idx, Command: cmd})
+			idx++
+		}
+	}
+
+	env := map[string]string{
+		"DPLOY_TARGET":       target.Name,
+		"DPLOY_TARGET_CLASS": target.Class,
+		"DPLOY_RESOURCES":    strings.Join(req.Resources, ","),
+		"DPLOY_SNAPSHOT_ID":  snapshotID,
+		"DPLOY_SNAPSHOT_ENV": snapshotEnv,
+	}
+
+	return &Plan{
+		Operation:   operation.TypeRestore,
+		Environment: target.Name,
+		Class:       target.Class,
+		Targets: []TargetPlan{
+			{
+				Name:  "local",
+				Type:  "local",
+				Path:  ".",
+				Env:   env,
+				Steps: plannedSteps,
+			},
+		},
+	}, nil
+}
+
 // sortedDataKeys returns the keys of m in sorted order. Used only to
 // produce a deterministic "available workflows" list in error messages.
 func sortedDataKeys(m map[string][]string) []string {
