@@ -13,3 +13,13 @@ environments:
       - run: echo "pulling latest code"
       - run: echo "installing deps"
       - run: echo "restarting service"
+
+    # capture runs before any restore into this env as a safety snapshot.
+    # If omitted, restore still works but skips the safety step.
+    capture:
+      database:
+        - echo "snapshotting local db to ./.dploy/artifacts/$DPLOY_SNAPSHOT_ID.sql"
+
+    restore:
+      database:
+        - echo "restoring $DPLOY_SNAPSHOT_ID (from $DPLOY_SNAPSHOT_ENV) into local"

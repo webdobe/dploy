@@ -1,7 +1,7 @@
 // Package operation defines the core operation model.
 //
-// Every user-facing action in dploy — deploy, sync, rollback, validate,
-// status, inspect — is an operation. The lifecycle is fixed:
+// Every user-facing action in dploy — deploy, capture, restore, rollback,
+// validate, status, inspect — is an operation. The lifecycle is fixed:
 //
 //	request → resolve → validate → plan → execute → record
 //
@@ -16,7 +16,6 @@ type Type string
 
 const (
 	TypeDeploy   Type = "deploy"
-	TypeSync     Type = "sync"
 	TypeCapture  Type = "capture"
 	TypeRestore  Type = "restore"
 	TypeRollback Type = "rollback"
@@ -28,11 +27,8 @@ const (
 
 // Request is the pre-resolution ask: what the user (or CI, or future UI) wants.
 //
-// Class / SourceClass / TargetClass carry the environment class so trusted
-// policy rules can match on it (e.g. "deny deploy to any production-class
-// environment from local context"). For deploy-style single-env ops, the
-// resolved env's class goes in Class. For sync operations it goes in
-// SourceClass / TargetClass.
+// Class carries the resolved environment's class so trusted policy rules
+// can match on it (e.g. "deny deploy to any production-class environment").
 //
 // Satisfied lists policy requirements the caller has acknowledged via
 // CLI flags (e.g. "confirm" via --confirm, "sanitization" via
@@ -40,14 +36,10 @@ const (
 type Request struct {
 	Type        Type
 	Environment string
-	Class       string   // environment class for single-env operations
-	SourceEnv   string   // sync operations
-	SourceClass string   // sync operations
-	TargetEnv   string   // sync operations
-	TargetClass string   // sync operations
+	Class       string   // environment class for the operation
 	Targets     []string // optional scope restriction
 	Roles       []string // optional scope restriction
-	Resources   []string // sync: database, files, media, etc.
+	Resources   []string // capture/restore: database, files, media, etc.
 	Artifact    string   // optional artifact reference
 	Satisfied   []string // acknowledged policy requirements
 }

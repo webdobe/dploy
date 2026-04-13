@@ -28,10 +28,9 @@ That is what `dploy` is for.
 It gives you one model for:
 
 - deploy
-- environment sync
-- rollback
 - capture
 - restore
+- rollback
 - status
 - logs
 
@@ -154,46 +153,136 @@ Prebuilt binaries and a Homebrew tap are planned once the CLI stabilizes.
 
 ---
 
-## Example commands
+## Golden path
+
+A real walkthrough: a Drupal + Next.js project with a Google Cloud SQL
+MySQL backend and a local DDEV setup. Save this as `dploy.yml` at the
+project root:
+
+```yaml
+app: efe
+
+environments:
+  local:
+    class: local
+    targets:
+      nextjs:
+        type: local
+        path: ./nextjs
+        roles: [web]
+      drupal:
+        type: local
+        path: ./drupal
+        roles: [cms]
+    deploy:
+      - run: "npm install"
+        on: [nextjs]
+      - run: "ddev start"
+        on: [drupal]
+      - run: "ddev composer install"
+        on: [drupal]
+    notes:
+      - "Next.js dev server: cd nextjs && npm run dev"
+    capture:               # used as the safety snapshot before restore
+      database:
+        - "mkdir -p ./.dploy/artifacts"
+        - "cd drupal && ddev export-db --file=../.dploy/artifacts/$DPLOY_SNAPSHOT_ID.sql.gz"
+    restore:
+      database:
+        - "cd drupal && ddev import-db --file=../.dploy/artifacts/$DPLOY_SNAPSHOT_ID.sql.gz"
+
+  production:
+    class: production
+    targets:
+      web:
+        type: local
+        path: .
+    capture:
+      database:
+        - "gcloud sql export sql my-instance gs://my-bucket/dploy/$DPLOY_SNAPSHOT_ID.sql.gz --project=my-project --database=my_db"
+        - "gsutil cp gs://my-bucket/dploy/$DPLOY_SNAPSHOT_ID.sql.gz ./.dploy/artifacts/$DPLOY_SNAPSHOT_ID.sql.gz"
+```
+
+### Validate the config
 
 ```bash
-dploy up staging
-dploy up production
-
-dploy env sync production local-jesse --resource database
-dploy env sync staging-main local-jesse --resource files
-
-dploy capture production --resource database
-dploy restore snapshot-123 local-jesse --resource database
-
-dploy rollback production
-dploy status production
-dploy logs production
 dploy validate
+```
+
+### Bring up the local environment
+
+```bash
+dploy local
+```
+
+That's shorthand for `dploy up local` — installs Next.js deps, starts
+DDEV, runs `composer install` inside the Drupal container, then prints
+the notes block so you remember what still needs a watchable terminal.
+
+### Capture the prod database
+
+```bash
+dploy capture production
+```
+
+`--resource` is auto-picked because `production.capture:` defines only
+one. dploy prints a `To restore:` hint with the exact next command.
+
+### Restore into local
+
+```bash
+dploy restore production-20260412-223303-31f222 local
+```
+
+Before running your restore workflow, dploy runs the `local.capture:`
+workflow as a safety snapshot of your current local DB. If the main
+restore fails for any reason, the safety snapshot's ID is printed so
+you can revert with another `dploy restore`.
+
+### List snapshots
+
+```bash
+dploy snapshots production
+```
+
+Shows snapshot IDs, status, creation time, and resources. Both captured
+snapshots and safety snapshots appear here.
+
+---
+
+## Other commands
+
+```bash
+dploy rollback production    # runs user-defined rollback: steps
+dploy status local           # last run for this env
+dploy logs local             # step-by-step output of the last run
+dploy version
 ```
 
 ---
 
-## Why environment sync matters
+## Why capture and restore matter
 
 This is one of the main reasons `dploy` exists.
 
 Most deployment tools stop at code delivery.
 
-`dploy` also treats environment sync as a first-class operation:
+`dploy` also treats moving environment data as a first-class pair of operations: **capture** (take a snapshot of a resource in one environment) and **restore** (apply a captured snapshot into another).
 
-- production → staging
-- production → local
-- staging → local
-- local → staging
+Typical flows:
+
+- capture production database → restore into local
+- capture staging files → restore into local
+- capture production before a risky deploy → restore if it goes wrong
 
 With:
 
 - explicit commands
 - resource scope
 - policy checks
-- sanitization requirements
+- sanitization attestation
 - logs and records
+- a durable, re-runnable snapshot artifact
 
 `dploy` does NOT become a database tool or storage system. It orchestrates approved workflows and lets policy decide what is allowed.
 
@@ -263,7 +352,7 @@ Focus is on:
 - strong config model
 - trusted policy support
 - deploy
-- env sync
+- capture / restore
 - logs
 - status
 - honest failure behavior

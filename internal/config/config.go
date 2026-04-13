@@ -29,7 +29,6 @@ type Environment struct {
 	Notes    []string            `yaml:"notes,omitempty"` // printed after a successful `up`, never executed
 	Rollback []Step              `yaml:"rollback,omitempty"`
 	Secrets  *SecretsRef         `yaml:"secrets,omitempty"`
-	Data     map[string][]string `yaml:"data,omitempty"`    // sync workflows, resource → commands
 	Capture  map[string][]string `yaml:"capture,omitempty"` // capture workflows, resource → commands
 	Restore  map[string][]string `yaml:"restore,omitempty"` // restore workflows, resource → commands
 }

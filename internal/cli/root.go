@@ -6,7 +6,14 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
+
+	"github.com/webdobe/dploy/internal/config"
+	"github.com/webdobe/dploy/internal/failure"
+	"github.com/webdobe/dploy/internal/operation"
+	"github.com/webdobe/dploy/internal/planner"
 )
 
 // Global flags shared across commands.
@@ -26,6 +33,29 @@ var rootCmd = &cobra.Command{
 	Long:          "dploy connects your repo, servers, scripts, and existing tools into one clear workflow.\nIt does not try to replace them.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	// Treat `dploy <env>` as shorthand for `dploy up <env>`. The arg
+	// only resolves to up when it names a configured environment;
+	// anything else falls through to the normal "unknown command" error.
+	Args: cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return cmd.Help()
+		}
+		envName := args[0]
+		cfg, err := config.Load(configFile)
+		if err != nil {
+			return fmt.Errorf("unknown command %q (and no %s to resolve it as an environment)", envName, configFile)
+		}
+		if _, ok := cfg.Environments[envName]; !ok {
+			return fmt.Errorf("unknown command or environment %q", envName)
+		}
+		return runPipeline(cmd, envName, pipelineOp{
+			opType:     operation.TypeDeploy,
+			verb:       "Deploy",
+			build:      planner.BuildDeploy,
+			noPlanExit: failure.ExitInvalidConfig,
+		})
+	},
 }
 
 func init() {

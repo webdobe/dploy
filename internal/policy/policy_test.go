@@ -48,36 +48,36 @@ func TestEvaluate(t *testing.T) {
 			wantReason:  "freeze in effect",
 		},
 		{
-			name: "deny by target env matches Environment for deploy",
+			name: "deny by environment",
 			policy: Policy{Rules: []Rule{
-				{TargetEnv: "production", Action: ActionDeny, Reason: "prod locked"},
+				{Environment: "production", Action: ActionDeny, Reason: "prod locked"},
 			}},
 			req:         operation.Request{Type: operation.TypeDeploy, Environment: "production"},
 			wantAllowed: false,
 			wantMatched: true,
 		},
 		{
-			name: "non-matching target env lets request through",
+			name: "non-matching environment lets request through",
 			policy: Policy{Rules: []Rule{
-				{TargetEnv: "production", Action: ActionDeny},
+				{Environment: "production", Action: ActionDeny},
 			}},
 			req:         operation.Request{Type: operation.TypeDeploy, Environment: "staging"},
 			wantAllowed: true,
 			wantMatched: false,
 		},
 		{
-			name: "deny by target class matches Class for deploy",
+			name: "deny by class",
 			policy: Policy{Rules: []Rule{
-				{TargetClass: "production", Action: ActionDeny, Reason: "class production is locked"},
+				{Class: "production", Action: ActionDeny, Reason: "class production is locked"},
 			}},
 			req:         operation.Request{Type: operation.TypeDeploy, Environment: "prod-us", Class: "production"},
 			wantAllowed: false,
 			wantMatched: true,
 		},
 		{
-			name: "non-matching target class lets request through",
+			name: "non-matching class lets request through",
 			policy: Policy{Rules: []Rule{
-				{TargetClass: "production", Action: ActionDeny},
+				{Class: "production", Action: ActionDeny},
 			}},
 			req:         operation.Request{Type: operation.TypeDeploy, Environment: "stg", Class: "staging"},
 			wantAllowed: true,
@@ -86,7 +86,7 @@ func TestEvaluate(t *testing.T) {
 			name: "deny wins over earlier allow",
 			policy: Policy{Rules: []Rule{
 				{Operation: "deploy", Action: ActionAllow},
-				{TargetEnv: "production", Action: ActionDeny, Reason: "frozen"},
+				{Environment: "production", Action: ActionDeny, Reason: "frozen"},
 			}},
 			req:         operation.Request{Type: operation.TypeDeploy, Environment: "production"},
 			wantAllowed: false,
@@ -96,7 +96,7 @@ func TestEvaluate(t *testing.T) {
 		{
 			name: "allow with requirements surfaces the requirements as unmet",
 			policy: Policy{Rules: []Rule{
-				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm"}},
+				{Environment: "production", Action: ActionAllow, Require: []string{"confirm"}},
 			}},
 			req:         operation.Request{Type: operation.TypeDeploy, Environment: "production"},
 			wantAllowed: true,
@@ -107,7 +107,7 @@ func TestEvaluate(t *testing.T) {
 		{
 			name: "requirements acknowledged by Satisfied are not unmet",
 			policy: Policy{Rules: []Rule{
-				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm"}},
+				{Environment: "production", Action: ActionAllow, Require: []string{"confirm"}},
 			}},
 			req: operation.Request{
 				Type: operation.TypeDeploy, Environment: "production",
@@ -121,7 +121,7 @@ func TestEvaluate(t *testing.T) {
 		{
 			name: "partial satisfaction leaves only the missing items unmet",
 			policy: Policy{Rules: []Rule{
-				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm", "sanitization"}},
+				{Environment: "production", Action: ActionAllow, Require: []string{"confirm", "sanitization"}},
 			}},
 			req: operation.Request{
 				Type: operation.TypeDeploy, Environment: "production",
@@ -136,7 +136,7 @@ func TestEvaluate(t *testing.T) {
 			name: "requirements from multiple matching rules are deduplicated",
 			policy: Policy{Rules: []Rule{
 				{Operation: "deploy", Action: ActionAllow, Require: []string{"confirm"}},
-				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm", "sanitization"}},
+				{Environment: "production", Action: ActionAllow, Require: []string{"confirm", "sanitization"}},
 			}},
 			req:         operation.Request{Type: operation.TypeDeploy, Environment: "production"},
 			wantAllowed: true,
@@ -147,7 +147,7 @@ func TestEvaluate(t *testing.T) {
 		{
 			name: "extra Satisfied items that aren't required are benign",
 			policy: Policy{Rules: []Rule{
-				{TargetEnv: "production", Action: ActionAllow, Require: []string{"confirm"}},
+				{Environment: "production", Action: ActionAllow, Require: []string{"confirm"}},
 			}},
 			req: operation.Request{
 				Type: operation.TypeDeploy, Environment: "production",
@@ -163,33 +163,18 @@ func TestEvaluate(t *testing.T) {
 			policy: Policy{Rules: []Rule{
 				{Resources: []string{"database"}, Action: ActionDeny},
 			}},
-			req:         operation.Request{Type: operation.TypeSync, Resources: []string{"files"}},
+			req:         operation.Request{Type: operation.TypeCapture, Resources: []string{"files"}},
 			wantAllowed: true,
 		},
 		{
 			name: "resource rule matches when requested resources include rule resources",
 			policy: Policy{Rules: []Rule{
-				{Resources: []string{"database"}, Action: ActionDeny, Reason: "db sync blocked"},
+				{Resources: []string{"database"}, Action: ActionDeny, Reason: "db capture blocked"},
 			}},
-			req:         operation.Request{Type: operation.TypeSync, Resources: []string{"database", "files"}},
+			req:         operation.Request{Type: operation.TypeCapture, Resources: []string{"database", "files"}},
 			wantAllowed: false,
 			wantMatched: true,
-			wantReason:  "db sync blocked",
-		},
-		{
-			name: "sync source class matches SourceClass on request",
-			policy: Policy{Rules: []Rule{
-				{SourceClass: "production", Operation: "sync", Action: ActionDeny, Reason: "no sync from prod"},
-			}},
-			req: operation.Request{
-				Type:        operation.TypeSync,
-				SourceEnv:   "prod",
-				SourceClass: "production",
-				TargetEnv:   "local",
-			},
-			wantAllowed: false,
-			wantMatched: true,
-			wantReason:  "no sync from prod",
+			wantReason:  "db capture blocked",
 		},
 	}
 
@@ -243,13 +228,12 @@ func TestLoad_RoundTripFromYAML(t *testing.T) {
 	path := filepath.Join(dir, "policy.yml")
 	yaml := `rules:
   - operation: deploy
-    target: production
-    target_class: production
+    environment: production
+    class: production
     action: deny
     reason: production deploys are frozen
-  - operation: sync
-    source: production
-    target: local
+  - operation: capture
+    environment: production
     resources: [database]
     action: allow
     require: [sanitization]
@@ -281,15 +265,14 @@ func TestLoad_RoundTripFromYAML(t *testing.T) {
 	}
 
 	// Second rule should surface a sanitization requirement for a
-	// prod→local database sync.
+	// production database capture.
 	d = p.Evaluate(operation.Request{
-		Type:      operation.TypeSync,
-		SourceEnv: "production",
-		TargetEnv: "local",
-		Resources: []string{"database"},
+		Type:        operation.TypeCapture,
+		Environment: "production",
+		Resources:   []string{"database"},
 	})
 	if !d.Allowed {
-		t.Error("expected allow for sync rule")
+		t.Error("expected allow for capture rule")
 	}
 	if len(d.Requirements) != 1 || d.Requirements[0] != "sanitization" {
 		t.Errorf("Requirements = %v; want [sanitization]", d.Requirements)

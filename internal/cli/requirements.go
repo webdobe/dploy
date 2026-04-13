@@ -1,6 +1,35 @@
 package cli
 
-import "strings"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// resolveResources picks which resource(s) a capture/restore operation
+// should run. If the caller passed --resource explicitly, that list wins.
+// Otherwise we auto-pick when the environment defines exactly one
+// resource; zero or multiple require the caller to choose.
+//
+// op is the user-facing verb used in error messages ("capture", "restore").
+func resolveResources(requested []string, workflows map[string][]string, op string) ([]string, error) {
+	if len(requested) > 0 {
+		return requested, nil
+	}
+	available := make([]string, 0, len(workflows))
+	for name := range workflows {
+		available = append(available, name)
+	}
+	sort.Strings(available)
+	switch len(available) {
+	case 0:
+		return nil, fmt.Errorf("%s requires --resource, and no %s resources are defined for this environment", op, op)
+	case 1:
+		return available, nil
+	default:
+		return nil, fmt.Errorf("%s requires --resource when multiple are defined (available: %s)", op, strings.Join(available, ", "))
+	}
+}
 
 // Policy requirement names recognised by the CLI. Policy rules refer
 // to these strings in their `require:` field.

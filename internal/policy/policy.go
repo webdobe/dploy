@@ -29,10 +29,8 @@ type Policy struct {
 // is then applied. Deny takes precedence over allow if multiple rules match.
 type Rule struct {
 	Operation   string   `yaml:"operation,omitempty"`
-	SourceEnv   string   `yaml:"source,omitempty"`
-	TargetEnv   string   `yaml:"target,omitempty"`
-	SourceClass string   `yaml:"source_class,omitempty"`
-	TargetClass string   `yaml:"target_class,omitempty"`
+	Environment string   `yaml:"environment,omitempty"`
+	Class       string   `yaml:"class,omitempty"`
 	Resources   []string `yaml:"resources,omitempty"`
 	Action      Action   `yaml:"action"`
 	Require     []string `yaml:"require,omitempty"`
@@ -135,20 +133,10 @@ func (r *Rule) matches(req operation.Request) bool {
 	if r.Operation != "" && r.Operation != string(req.Type) {
 		return false
 	}
-	if r.SourceEnv != "" && r.SourceEnv != req.SourceEnv {
+	if r.Environment != "" && r.Environment != req.Environment {
 		return false
 	}
-	// TargetEnv matches the explicit TargetEnv (sync) or the single-env
-	// Environment field (deploy-style). Either form is valid shorthand.
-	if r.TargetEnv != "" && r.TargetEnv != req.TargetEnv && r.TargetEnv != req.Environment {
-		return false
-	}
-	if r.SourceClass != "" && r.SourceClass != req.SourceClass {
-		return false
-	}
-	// Same shorthand for class: TargetClass matches TargetClass (sync)
-	// or the single-env Class field (deploy-style).
-	if r.TargetClass != "" && r.TargetClass != req.TargetClass && r.TargetClass != req.Class {
+	if r.Class != "" && r.Class != req.Class {
 		return false
 	}
 	if len(r.Resources) > 0 {

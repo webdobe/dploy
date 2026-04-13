@@ -18,7 +18,7 @@ import (
 	"github.com/webdobe/dploy/internal/state"
 )
 
-var captureResources []string
+var captureResourceFlag []string
 
 var captureCmd = &cobra.Command{
 	Use:   "capture <environment>",
@@ -47,8 +47,8 @@ Examples:
 
 func init() {
 	rootCmd.AddCommand(captureCmd)
-	captureCmd.Flags().StringSliceVar(&captureResources, "resource", nil,
-		"resource(s) to capture (repeatable or comma-separated); required")
+	captureCmd.Flags().StringSliceVar(&captureResourceFlag, "resource", nil,
+		"resource(s) to capture (repeatable or comma-separated); auto-picks when exactly one is defined")
 }
 
 // printRestoreHint shows the exact command needed to restore this snapshot.
@@ -89,11 +89,6 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	envName := args[0]
 	log := logging.New(verbose, quiet)
 
-	if len(captureResources) == 0 {
-		return failure.WithExit(failure.ExitGeneralFailure,
-			fmt.Errorf("capture requires --resource (e.g. --resource database)"))
-	}
-
 	// 1. Load + validate config.
 	cfg, err := config.Load(configFile)
 	if err != nil {
@@ -112,7 +107,13 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		return failure.WithExit(failure.ExitEnvironmentMissing, err)
 	}
 
-	// 3. Build request and generate the snapshot ID up front so it can
+	// 3. Resolve --resource (auto-pick when exactly one defined).
+	resources, err := resolveResources(captureResourceFlag, cfg.Environments[envName].Capture, "capture")
+	if err != nil {
+		return failure.WithExit(failure.ExitGeneralFailure, err)
+	}
+
+	// 4. Build request and generate the snapshot ID up front so it can
 	//    flow into scripts as DPLOY_SNAPSHOT_ID and also end up on the
 	//    recorded Result + Snapshot metadata.
 	startedAt := time.Now()
@@ -122,7 +123,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		Type:        operation.TypeCapture,
 		Environment: envName,
 		Class:       source.Class,
-		Resources:   captureResources,
+		Resources:   resources,
 		Satisfied:   collectSatisfiedRequirements(),
 	}
 
@@ -139,7 +140,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	}
 
 	// 6. Header.
-	log.Info("Running capture for %s (snapshot %s, resources: %v)", envName, snapshotID, captureResources)
+	log.Info("Running capture for %s (snapshot %s, resources: %v)", envName, snapshotID, resources)
 	if !quiet {
 		fmt.Fprintln(cmd.OutOrStdout())
 	}
@@ -148,7 +149,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	//    with our pre-exec time so the snapshot id and the record
 	//    timestamps line up.
 	result, err := executeAndRecord(cmd, log, plan, pol.Source, func(r *operation.Result) {
-		r.Resources = captureResources
+		r.Resources = resources
 		r.SnapshotID = snapshotID
 		r.StartedAt = startedAt
 	})
@@ -164,7 +165,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 		ID:         snapshotID,
 		Env:        envName,
 		Class:      source.Class,
-		Resources:  captureResources,
+		Resources:  resources,
 		Status:     result.Status,
 		Sanitized:  sanitizedFlag,
 		CreatedAt:  startedAt,
@@ -182,7 +183,7 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	switch result.Status {
 	case operation.StatusSuccess:
 		log.Info("Capture succeeded (snapshot: %s)", snapshotID)
-		printRestoreHint(cmd, cfg, envName, snapshotID, captureResources)
+		printRestoreHint(cmd, cfg, envName, snapshotID, resources)
 		return nil
 	case operation.StatusPartialFailure:
 		return failure.WithExit(
