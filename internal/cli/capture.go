@@ -188,12 +188,12 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	case operation.StatusPartialFailure:
 		return failure.WithExit(
 			failure.ExitStepFailure,
-			fmt.Errorf("capture partial_failure: some resources captured before a later step failed (snapshot: %s)", snapshotID),
+			fmt.Errorf("capture partial_failure: some resources captured before a later step failed (snapshot: %s)%s", snapshotID, failedStepSuffix(result)),
 		)
 	case operation.StatusFailedExecution:
 		return failure.WithExit(
 			failure.ExitStepFailure,
-			fmt.Errorf("capture failed_execution: see logs for the failing step (snapshot: %s)", snapshotID),
+			fmt.Errorf("capture failed_execution (snapshot: %s)%s", snapshotID, failedStepSuffix(result)),
 		)
 	default:
 		return failure.WithExit(failure.ExitGeneralFailure, fmt.Errorf("capture finished with status %s (snapshot: %s)", result.Status, snapshotID))

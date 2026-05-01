@@ -148,13 +148,13 @@ func runRestore(cmd *cobra.Command, args []string) error {
 		printSafetyRevertHint(cmd, safetyID, envName, resources)
 		return failure.WithExit(
 			failure.ExitStepFailure,
-			fmt.Errorf("restore partial_failure: some resources restored before a later step failed (snapshot: %s)", snap.ID),
+			fmt.Errorf("restore partial_failure: some resources restored before a later step failed (snapshot: %s)%s", snap.ID, failedStepSuffix(result)),
 		)
 	case operation.StatusFailedExecution:
 		printSafetyRevertHint(cmd, safetyID, envName, resources)
 		return failure.WithExit(
 			failure.ExitStepFailure,
-			fmt.Errorf("restore failed_execution: see logs for the failing step (snapshot: %s)", snap.ID),
+			fmt.Errorf("restore failed_execution (snapshot: %s)%s", snap.ID, failedStepSuffix(result)),
 		)
 	default:
 		printSafetyRevertHint(cmd, safetyID, envName, resources)

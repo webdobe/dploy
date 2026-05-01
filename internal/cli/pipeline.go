@@ -157,12 +157,12 @@ func runPipeline(cmd *cobra.Command, envName string, op pipelineOp) error {
 	case operation.StatusPartialFailure:
 		return failure.WithExit(
 			failure.ExitStepFailure,
-			fmt.Errorf("%s partial_failure: %d target(s) changed before a later step failed", lowerVerb, countSuccessfulTargets(plan, result)),
+			fmt.Errorf("%s partial_failure: %d target(s) changed before a later step failed%s", lowerVerb, countSuccessfulTargets(plan, result), failedStepSuffix(result)),
 		)
 	case operation.StatusFailedExecution:
 		return failure.WithExit(
 			failure.ExitStepFailure,
-			fmt.Errorf("%s failed_execution: see logs for the failing step", lowerVerb),
+			fmt.Errorf("%s failed_execution%s", lowerVerb, failedStepSuffix(result)),
 		)
 	case operation.StatusFailedResolution:
 		return failure.WithExit(
